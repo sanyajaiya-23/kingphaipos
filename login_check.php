@@ -1,0 +1,88 @@
+<?php
+// ตรวจสอบการเข้าสู่ระบบ (ใช้ tb_admin เท่านั้น)
+require($_SERVER['DOCUMENT_ROOT'] . "/inc/db/db_webdev.php");
+require($_SERVER['DOCUMENT_ROOT'] . "/inc/mobile_auth.php");
+session_start();
+
+$username = isset($_POST["username"]) ? trim($_POST["username"]) : "";
+// ไม่ trim รหัสผ่าน เพื่อรองรับรหัสที่มีช่องว่างนำหน้า/ท้ายใน tb_admin
+$password = isset($_POST["password"]) ? (string)$_POST["password"] : "";
+
+$fromShop = (isset($_POST["from"]) && $_POST["from"] === "shop");
+$failUrl = $fromShop ? "/shop.php?res=wrong" : "/index.php?res=wrong";
+if ($username === "" || $password === "") {
+  header("Location:" . $failUrl);
+  exit;
+}
+
+// ลูกค้าร้านออนไลน์ (id_status = 2): ตรวจกับ tb_admin ของ POS ก่อน (รหัสผ่านเก็บแบบแฮช) แล้วเข้าหน้าร้าน
+try {
+  $cq = $db->conn->prepare("SELECT id_admin, `user`, id_status, `name`, pass FROM tb_admin WHERE `user` = ? AND id_status = 2 LIMIT 1");
+  $cq->execute([$username]);
+  $cr = $cq->fetch(PDO::FETCH_ASSOC);
+  if ($cr) {
+    $hp = (string)$cr["pass"];
+    $okc = (strpos($hp, '$2y$') === 0) ? password_verify($password, $hp) : hash_equals($hp, $password);
+    if (!$okc) { header("Location:" . $failUrl); exit; }
+    kp_mobile_apply_login_session($cr, $username);
+    header("Location:/shop.php");
+    exit;
+  }
+} catch (Throwable $eC) {}
+
+$sql = "
+SELECT
+  tb_admin.id_admin,
+  tb_admin.`user` AS user,
+  tb_admin.id_status,
+  tb_admin.`name` AS name
+FROM
+  tb_admin
+WHERE
+  tb_admin.`user` = ?
+  AND
+  tb_admin.pass = ?
+LIMIT 1
+";
+
+// ตรวจกับบัญชีพนักงานของระบบขายน้ำเดิมก่อน (inc/auth_source.php) — ไม่มี/ต่อไม่ได้ ค่อยใช้ tb_admin ของ POS
+require_once($_SERVER['DOCUMENT_ROOT'] . "/inc/auth_source.php");
+$srcAuth = kp_source_authenticate($db, $username, $password);
+if ($srcAuth["status"] === "wrong" || $srcAuth["status"] === "gone") {
+  header("Location:" . $failUrl);
+  exit;
+}
+$data = ($srcAuth["status"] === "ok") ? [$srcAuth["row"]] : $db->select_filter($sql, [$username, $password]);
+
+// พนักงานที่บันทึกลาออกแล้ว เข้าระบบไม่ได้ (คำขอ 2026-09-27)
+// คอลัมน์ work_status เพิ่มทีหลัง เครื่องที่ยังไม่มีคอลัมน์นี้ให้ข้ามการตรวจไปเลย (ระบบเดิมไม่พัง)
+if (is_array($data) && count($data) > 0) {
+  try {
+    $chk = $db->conn->prepare("SELECT work_status FROM tb_admin WHERE `user` = ? LIMIT 1");
+    $chk->execute([$username]);
+    $row = $chk->fetch(PDO::FETCH_ASSOC);
+    if ($row && strtolower(trim((string)($row["work_status"] ?? ""))) === "resigned") {
+      header("Location:/index.php?res=resigned");
+      exit;
+    }
+  } catch (Exception $eWs) {}
+  // พนักงานที่ถูก "พักงาน" เข้าแอปไม่ได้ (คำขอ 2026-09-28) — แยก query กันพังถ้ายังไม่มีคอลัมน์ hr_hold
+  try {
+    $chkH = $db->conn->prepare("SELECT hr_hold FROM tb_admin WHERE `user` = ? LIMIT 1");
+    $chkH->execute([$username]);
+    $rowH = $chkH->fetch(PDO::FETCH_ASSOC);
+    if ($rowH && (int)($rowH["hr_hold"] ?? 0) === 1) {
+      header("Location:/index.php?res=hold");
+      exit;
+    }
+  } catch (Exception $eHold) {}
+}
+
+if (is_array($data) && count($data) > 0) {
+  kp_mobile_apply_login_session($data[0], $username);
+  header("Location:" . ((int)($data[0]["id_status"] ?? 0) === 2 ? "/shop.php" : "select_page.php"));
+  exit;
+}
+
+header("Location:" . $failUrl);
+exit;

@@ -1,0 +1,237 @@
+<?php
+// หน้าขาย POS (หน้าร้าน) — ดีไซน์การ์ดกระจกโทนมิ้นต์/พีช: หน้าแรก · หมวดหมู่ · สินค้า · ตะกร้า · ชำระเงิน · บิล · บัญชี
+require($_SERVER['DOCUMENT_ROOT'] . "/inc/db/db_webdev.php");
+require($_SERVER['DOCUMENT_ROOT'] . "/inc/auth.php");
+require($_SERVER['DOCUMENT_ROOT'] . "/inc/branch.php");
+kp_require_login();
+$kpAdmin = isset($_SESSION["id_status"]) && (int)$_SESSION["id_status"] === 1;
+// พนักงานต้องเลือกสาขาจากแผนที่ก่อน (ครั้งเดียวตอนเริ่มงาน) จึงจะเข้าหน้าขายได้
+if (!$kpAdmin && empty($_SESSION["branch_picked"])) { header("Location:/index2.php"); exit; }
+?>
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#fbf1e1">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>หน้าขาย · kingphai network</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/pos_sale.css?v=<?php echo (int)@filemtime(__DIR__ . "/css/pos_sale.css"); ?>">
+  <link rel="stylesheet" href="css/kp_clay.css?v=<?php echo (int)@filemtime(__DIR__ . "/css/kp_clay.css"); ?>">
+</head>
+<body>
+<div class="ps-app" id="app" data-admin="<?php echo $kpAdmin ? 1 : 0; ?>">
+
+  <!-- ===== หน้าแรก ===== -->
+  <section class="ps-view is-active" id="v-home">
+    <header class="ps-top">
+      <button class="ps-loc" id="btnBranch" type="button"<?php echo $kpAdmin ? "" : " disabled style=\"cursor:default\""; ?>>
+        <span class="ps-loc__pin">📍</span>
+        <span class="ps-loc__tx"><small>สาขาที่ขาย</small><b id="branchName">-</b></span>
+        <?php if ($kpAdmin) { ?><span class="ps-loc__chev">▾</span><?php } ?>
+      </button>
+      <button class="ps-round" id="btnMe" type="button" aria-label="บัญชี"><span id="meInitial">K</span></button>
+    </header>
+
+    <div class="ps-searchrow">
+      <label class="ps-search">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="M20 20l-4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <input id="q" type="search" inputmode="search" placeholder="ค้นหาสินค้า หรือสแกนบาร์โค้ด" autocomplete="off">
+        <button type="button" class="ps-scanbtn" id="btnScan" aria-label="สแกนสินค้า" title="สแกนบาร์โค้ด / QR">
+          <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M8 9v6M11 9v6M14 9v6M17 9v6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </button>
+      </label>
+      <button class="ps-filter" id="btnFilter" type="button" aria-label="หมวดหมู่">
+        <svg viewBox="0 0 24 24" width="22" height="22"><path d="M4 7h10M18 7h2M4 17h2M10 17h10" stroke="#fff" stroke-width="2" stroke-linecap="round"/><circle cx="16" cy="7" r="2.2" fill="none" stroke="#fff" stroke-width="2"/><circle cx="8" cy="17" r="2.2" fill="none" stroke="#fff" stroke-width="2"/></svg>
+      </button>
+    </div>
+
+    <div class="ps-banner">
+      <div class="ps-banner__tx">
+        <small><span id="bnLabel">ยอดขายของฉันวันนี้</span> · <span id="bnBranch">-</span></small>
+        <div class="ps-banner__sum" id="bnSum">฿0</div>
+        <div class="ps-banner__sub"><span id="bnBills">0</span> บิล</div>
+        <button class="ps-btn ps-btn--sm" id="btnDay" type="button">สรุปยอด · ปิดกะ</button>
+      </div>
+      <div class="ps-banner__art" aria-hidden="true">🧺<i>🥕</i><i>🍎</i><i>🥛</i><b>%</b></div>
+    </div>
+
+    <div class="ps-cats" id="catGrid"></div>
+
+    <div class="ps-sec" id="secTop" hidden>
+      <div class="ps-sec__h"><h3>สินค้าขายดี</h3></div>
+      <div class="ps-hrow" id="topRow"></div>
+    </div>
+
+    <div class="ps-sec">
+      <div class="ps-sec__h"><h3 id="listTitle">สินค้าทั้งหมด</h3>
+        <button class="ps-link" id="btnAddProduct" type="button">＋ เพิ่มสินค้า</button>
+      </div>
+      <div class="ps-grid" id="grid"></div>
+      <div class="ps-empty" id="gridEmpty" hidden></div>
+    </div>
+  </section>
+
+  <!-- ===== หมวดหมู่ ===== -->
+  <section class="ps-view" id="v-cats">
+    <header class="ps-head"><button class="ps-back" data-nav="home" type="button" aria-label="กลับ">‹</button><h2>หมวดหมู่</h2><span class="ps-head__sp"></span></header>
+    <div class="ps-banner ps-banner--soft">
+      <div class="ps-banner__tx"><small>เลือกหมวดเพื่อดูสินค้า</small><div class="ps-banner__sum" id="catTotal">0 รายการ</div></div>
+      <div class="ps-banner__art" aria-hidden="true">🛍️</div>
+    </div>
+    <div class="ps-list" id="catList"></div>
+    <button class="ps-btn ps-btn--ghost ps-wide" id="btnAddCat" type="button">＋ เพิ่มหมวดหมู่</button>
+  </section>
+
+  <!-- ===== รายละเอียดสินค้า ===== -->
+  <section class="ps-view" id="v-detail">
+    <header class="ps-head"><button class="ps-back" data-back type="button" aria-label="กลับ">‹</button><h2>รายละเอียดสินค้า</h2>
+      <button class="ps-round ps-round--sm" id="btnEditProduct" type="button" aria-label="แก้ไข">✎</button>
+    </header>
+    <div id="detailBody"></div>
+  </section>
+
+  <!-- ===== ตะกร้า ===== -->
+  <section class="ps-view" id="v-cart">
+    <header class="ps-head"><button class="ps-back" data-nav="home" type="button" aria-label="กลับ">‹</button>
+      <h2>ตะกร้าสินค้า<small id="cartSub">0 รายการ</small></h2><button class="ps-link" id="btnClear" type="button">ล้าง</button></header>
+    <div class="ps-list" id="cartList"></div>
+    <div class="ps-card ps-promo" id="discBox">
+      <span>ส่วนลดทั้งบิล</span>
+      <div class="ps-promo__in">
+        <select id="discType"><option value="baht">บาท</option><option value="pct">%</option></select>
+        <input id="discVal" type="number" inputmode="decimal" min="0" placeholder="0">
+        <button class="ps-link" id="btnDisc" type="button">ใช้</button>
+      </div>
+    </div>
+    <div class="ps-card ps-sum" id="cartSum"></div>
+    <button class="ps-cta" id="btnToPay" type="button"><span>ไปชำระเงิน</span><i>→</i></button>
+  </section>
+
+  <!-- ===== ชำระเงิน ===== -->
+  <section class="ps-view" id="v-pay">
+    <header class="ps-head"><button class="ps-back" data-nav="cart" type="button" aria-label="กลับ">‹</button><h2>ชำระเงิน</h2><span class="ps-head__sp"></span></header>
+    <div class="ps-card">
+      <h4>ลูกค้า</h4>
+      <div class="ps-cust"><span class="ps-cust__pin">👤</span><div class="ps-cust__tx"><b id="custName">ลูกค้าทั่วไป</b><small id="custSub">ไม่ระบุลูกค้า</small></div>
+        <button class="ps-link" id="btnCust" type="button">เปลี่ยน</button></div>
+    </div>
+    <div class="ps-card">
+      <h4>ช่องทางชำระเงิน</h4>
+      <div class="ps-pay" id="payMethods">
+        <label class="ps-pm is-on" data-m="cash"><span class="ps-pm__ic">💵</span><span class="ps-pm__tx"><b>เงินสด</b><small>รับเงิน · คำนวณเงินทอน</small></span><i class="ps-radio"></i></label>
+        <label class="ps-pm" data-m="transfer"><span class="ps-pm__ic">📱</span><span class="ps-pm__tx"><b>โอน / PromptPay</b><small>ลูกค้าโอนแล้ว</small></span><i class="ps-radio"></i></label>
+        <label class="ps-pm" data-m="credit"><span class="ps-pm__ic">🧾</span><span class="ps-pm__tx"><b>เครดิตลูกค้า</b><small>ค้างชำระ (ต้องเลือกลูกค้า)</small></span><i class="ps-radio"></i></label>
+      </div>
+      <div class="ps-cash" id="cashBox">
+        <label>รับเงินมา (฿)</label>
+        <input id="received" type="number" inputmode="decimal" min="0" placeholder="0">
+        <div class="ps-chips" id="cashChips"></div>
+        <div class="ps-change"><span>เงินทอน</span><b id="changeAmt">฿0</b></div>
+      </div>
+    </div>
+    <div class="ps-card ps-total"><span>ยอดชำระ</span><b id="payTotal">฿0</b></div>
+    <button class="ps-cta" id="btnConfirm" type="button"><span>ยืนยันการขาย</span><i>→</i></button>
+  </section>
+
+  <!-- ===== สรุปยอดวันนี้ / ปิดกะ ===== -->
+  <section class="ps-view" id="v-day">
+    <header class="ps-head"><button class="ps-back" data-nav="home" type="button" aria-label="กลับ">‹</button><h2>สรุปยอด<small id="dayDate">วันนี้</small></h2><span class="ps-head__sp"></span></header>
+    <div id="dayBody"></div>
+  </section>
+
+  <!-- ===== แอดมิน: ยืนยันเงินโอน + ยอดส่งปิดกะ ===== -->
+  <section class="ps-view" id="v-admin">
+    <header class="ps-head"><button class="ps-back" data-nav="me" type="button" aria-label="กลับ">‹</button><h2>ยอดส่ง · เงินโอน</h2><span class="ps-head__sp"></span></header>
+    <div id="adminBody"></div>
+  </section>
+
+  <!-- ===== บิล ===== -->
+  <section class="ps-view" id="v-orders">
+    <header class="ps-head"><button class="ps-back" data-nav="home" type="button" aria-label="กลับ">‹</button><h2>บิลขาย</h2>
+      <select class="ps-sel" id="ordDays"><option value="0">วันนี้</option><option value="6">7 วัน</option><option value="29">30 วัน</option></select></header>
+    <div class="ps-list" id="orderList"></div>
+  </section>
+
+  <?php if ($kpAdmin) { ?>
+  <!-- ===== แอดมิน: ประวัติการขาย / สรุปกราฟ / พนักงาน / สมัครงาน (json/pos_admin.js) ===== -->
+  <section class="ps-view" id="v-hist">
+    <header class="ps-head"><button class="ps-back" data-nav="me" type="button" aria-label="กลับ">‹</button><h2>ประวัติการขาย</h2><span class="ps-head__sp"></span></header>
+    <div class="ps-brs" id="histBr"></div>
+    <div class="ps-card ps-flt" id="histFlt"></div>
+    <div id="histSum" class="ps-kpis"></div>
+    <div class="ps-list" id="histList"></div>
+  </section>
+  <section class="ps-view" id="v-report">
+    <header class="ps-head"><button class="ps-back" data-nav="me" type="button" aria-label="กลับ">‹</button><h2>สรุป / กราฟ</h2><span class="ps-head__sp"></span></header>
+    <div class="ps-card ps-flt" id="repFlt"></div>
+    <div id="repBody"></div>
+  </section>
+  <section class="ps-view" id="v-staff">
+    <header class="ps-head"><button class="ps-back" data-nav="me" type="button" aria-label="กลับ">‹</button><h2>จัดการพนักงาน</h2><button class="ps-btn ps-btn--sm" id="stAdd" type="button">+ เพิ่ม</button></header>
+    <div class="ps-tabs" id="stTabs"><button data-st="list" class="is-on" type="button">รายชื่อ</button><button data-st="att" type="button">ลงเวลา</button><button data-st="pay" type="button">ค่าแรงเดือน</button></div>
+    <div id="stBody"></div>
+  </section>
+  <section class="ps-view" id="v-jobs">
+    <header class="ps-head"><button class="ps-back" data-nav="me" type="button" aria-label="กลับ">‹</button><h2>ใบสมัครงาน</h2><span class="ps-head__sp"></span></header>
+    <div id="jobBody"></div>
+  </section>
+  <?php } ?>
+
+  <!-- ===== บัญชี ===== -->
+  <section class="ps-view" id="v-me">
+    <header class="ps-head"><button class="ps-back" data-nav="home" type="button" aria-label="กลับ">‹</button><h2>บัญชี</h2><span class="ps-head__sp"></span></header>
+    <div class="ps-card ps-me">
+      <div class="ps-avatar" id="meAvatar">K</div>
+      <div><b id="meName">-</b><small id="meRole">-</small></div>
+    </div>
+    <div class="ps-card" id="printCard"></div>
+    <?php if ($kpAdmin) { ?><div class="ps-card"><h4>สลับสาขา</h4><div class="ps-pay" id="meBranches"></div></div><?php } else { ?>
+    <div class="ps-card"><h4>สาขาที่ประจำวันนี้</h4><div class="ps-pay" id="meBranches"></div><small>เปลี่ยนสาขา: ออกจากระบบแล้ว login ใหม่</small></div><?php } ?>
+    <div class="ps-card ps-links">
+      <?php if ($kpAdmin) { ?>
+      <a href="#" data-nav="hist">🧾 ประวัติการขาย (ทุกสาขา)</a>
+      <a href="#" data-nav="report">📊 สรุปยอด / กราฟ</a>
+      <a href="#" data-nav="staff">👥 จัดการพนักงาน · ลงเวลา · ค่าแรง</a>
+      <a href="#" data-nav="jobs">📝 ใบสมัครงาน <span class="ps-chip ps-chip--credit" id="jobBadge" hidden>0</span></a>
+      <a href="#" data-nav="admin">💰 ยอดส่งปิดกะ · ยืนยันเงินโอน <span class="ps-chip ps-chip--credit" id="admBadge" hidden>0</span></a>
+      <a href="select_page.php">☰ เมนูหลัก</a>
+      <a href="index2.php">🗺️ แผนที่สาขา</a>
+      <a href="branch_manage.php">🏬 จัดการสาขา</a>
+      <?php } ?>
+      <a href="logout.php">⎋ ออกจากระบบ</a>
+    </div>
+  </section>
+
+  <!-- ===== แถบเมนูล่าง ===== -->
+  <nav class="ps-nav" id="nav">
+    <button data-nav="home" class="is-on" type="button"><svg viewBox="0 0 24 24"><path d="M4 11l8-7 8 7v8a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1z" fill="currentColor"/></svg><span>หน้าแรก</span></button>
+    <button data-nav="cats" type="button"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="2" fill="currentColor"/><rect x="13" y="4" width="7" height="7" rx="2" fill="currentColor"/><rect x="4" y="13" width="7" height="7" rx="2" fill="currentColor"/><rect x="13" y="13" width="7" height="7" rx="2" fill="currentColor"/></svg><span>หมวดหมู่</span></button>
+    <button data-nav="cart" class="ps-nav__cart" type="button" aria-label="ตะกร้า"><svg viewBox="0 0 24 24" width="28" height="28"><path d="M3 4h2l2.4 11h10.2L20 7H6.2" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="9" cy="19" r="1.6" fill="#fff"/><circle cx="17" cy="19" r="1.6" fill="#fff"/></svg><em id="cartBadge" hidden>0</em></button>
+    <button data-nav="orders" type="button"><svg viewBox="0 0 24 24"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z" fill="currentColor"/></svg><span>บิล</span></button>
+    <button data-nav="me" type="button"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4" fill="currentColor"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7z" fill="currentColor"/></svg><span>บัญชี</span></button>
+  </nav>
+
+  <!-- ===== แผ่นเลื่อนขึ้น (sheet) ===== -->
+  <div class="ps-sheetbg" id="sheetBg" hidden></div>
+  <div class="ps-sheet" id="sheet" hidden></div>
+
+  <!-- ===== ขายสำเร็จ ===== -->
+  <div class="ps-scan" id="scan" hidden></div>
+  <div class="ps-sheet ps-sheet--lock" id="lockSheet" hidden></div>
+  <div class="ps-done" id="done" hidden></div>
+  <div class="ps-toast" id="toast" hidden></div>
+</div>
+
+<!-- ใบเสร็จ (เฉพาะตอนพิมพ์) -->
+<div id="receipt"></div>
+
+<script src="lib/html2canvas.min.js"></script>
+<script src="json/kp_bt_print.js?v=<?php echo (int)@filemtime(__DIR__ . "/json/kp_bt_print.js"); ?>"></script>
+<script src="json/pos_sale.js?v=<?php echo (int)@filemtime(__DIR__ . "/json/pos_sale.js"); ?>"></script>
+<?php if ($kpAdmin) { ?><script src="json/pos_admin.js?v=<?php echo (int)@filemtime(__DIR__ . "/json/pos_admin.js"); ?>"></script><?php } ?>
+</body>
+</html>

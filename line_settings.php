@@ -1,0 +1,202 @@
+<?php
+/**
+ * line_settings.php — ตั้งค่า "ส่งสรุปยอดขายเข้า LINE OA ทุกวัน"
+ * หน้าเดี่ยว แยกจากหน้าอื่นทั้งหมด (เหมือนแนวทาง driver_track.php / sale_analysis_print.php)
+ */
+require($_SERVER['DOCUMENT_ROOT']."/inc/db/db_webdev.php");
+require($_SERVER['DOCUMENT_ROOT']."/inc/auth.php");
+require($_SERVER['DOCUMENT_ROOT']."/json/line_config_lib.php");
+kp_require_login();
+$isAdmin = (isset($_SESSION['id_status']) && (int)$_SESSION['id_status'] === 1);
+if (!$isAdmin) {
+  http_response_code(403);
+  echo "forbidden";
+  exit;
+}
+
+$cfg = kp_line_get_config($db);
+$hasToken = trim((string)($cfg["channel_access_token"] ?? "")) !== "";
+$sendHour = (int)($cfg["send_hour"] ?? 17);
+$lastSent = (string)($cfg["last_broadcast_date"] ?? "");
+?>
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#0f172a">
+  <title>ตั้งค่าแจ้งเตือน LINE</title>
+  <link rel="stylesheet" href="lib/font-awesome-4.7.0/css/font-awesome.min.css">
+  <style>
+    :root{
+      --ls-bg: #0f172a;
+      --ls-card: rgba(255,255,255,0.07);
+      --ls-line: rgba(255,255,255,0.12);
+      --ls-text: #ffffff;
+      --ls-muted: rgba(255,255,255,0.55);
+      /* เขียวหลักของแอป Kingphai (เดียวกับปุ่ม/ไฮไลท์ทั่วทั้งแอป) ไม่ใช้เขียวแบรนด์ LINE โดยตรง */
+      --ls-green: #22c55e;
+      --ls-green-dark: #16a34a;
+    }
+    *{ box-sizing: border-box; }
+    html, body{ margin:0; padding:0; }
+    body{
+      min-height: 100%;
+      background:
+        radial-gradient(900px 400px at 15% 0%, rgba(34,197,94,0.16), rgba(34,197,94,0) 60%),
+        var(--ls-bg);
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+      color: var(--ls-text);
+      -webkit-font-smoothing: antialiased;
+    }
+    .ls-wrap{ max-width: 640px; margin: 0 auto; padding: 16px 16px 40px; }
+    .ls-back{
+      display:inline-flex; align-items:center; gap:6px;
+      color: var(--ls-muted); text-decoration:none; font-size:14px; padding:8px 0; margin-bottom:6px;
+    }
+    .ls-back:active{ opacity:0.7; }
+    .ls-head{ margin: 6px 0 18px; }
+    .ls-head__title{ font-size:20px; font-weight:800; display:flex; align-items:center; gap:8px; }
+    .ls-head__sub{ color: var(--ls-muted); font-size:13px; margin-top:4px; }
+    .ls-card{
+      background: var(--ls-card);
+      border: 1px solid var(--ls-line);
+      border-radius: 16px;
+      padding: 16px;
+      margin-bottom: 14px;
+    }
+    .ls-card__title{ font-weight:700; font-size:15px; margin-bottom:10px; display:flex; align-items:center; gap:8px; }
+    .ls-status{
+      display:flex; align-items:center; gap:8px; padding:10px 12px; border-radius:12px;
+      background: rgba(255,255,255,0.05); font-size:13px; margin-bottom:12px;
+    }
+    .ls-status .dot{ width:8px; height:8px; border-radius:50%; flex:none; }
+    .dot--on{ background: var(--ls-green); }
+    .dot--off{ background: #f59e0b; }
+    label.ls-label{ display:block; font-size:13px; color: var(--ls-muted); margin: 10px 0 6px; }
+    .ls-input, .ls-select{
+      width:100%; padding:11px 12px; border-radius:10px;
+      border:1px solid var(--ls-line); background: rgba(255,255,255,0.05);
+      color: var(--ls-text); font-size:14px;
+    }
+    .ls-input::placeholder{ color: rgba(255,255,255,0.35); }
+    .ls-row{ display:flex; gap:10px; margin-top:16px; flex-wrap:wrap; }
+    .ls-btn{
+      flex:1; min-width:140px; padding:12px 14px; border-radius:12px; border:none;
+      font-size:14px; font-weight:700; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px;
+    }
+    .ls-btn--primary{
+      background: linear-gradient(140deg, var(--ls-green), var(--ls-green-dark));
+      box-shadow: 0 12px 26px rgba(34,197,94,0.35);
+      color: #fff;
+    }
+    .ls-btn--ghost{ background: rgba(255,255,255,0.08); color: var(--ls-text); border:1px solid var(--ls-line); }
+    .ls-btn:active{ opacity:0.8; }
+    .ls-btn:disabled{ opacity:0.5; cursor:not-allowed; }
+    .ls-msg{ font-size:13px; margin-top:10px; min-height:18px; }
+    .ls-msg--ok{ color: #4ade80; }
+    .ls-msg--err{ color: #f87171; }
+    .ls-steps{ font-size:13px; line-height:1.8; color: rgba(255,255,255,0.85); padding-left:18px; margin:0; }
+    .ls-steps li{ margin-bottom:4px; }
+    .ls-steps a{ color:#7dd3fc; }
+  </style>
+</head>
+<body>
+  <div class="ls-wrap">
+    <a href="index2.php" class="ls-back"><i class="fa fa-chevron-left"></i> กลับ</a>
+    <div class="ls-head">
+      <div class="ls-head__title"><i class="fa fa-paper-plane" aria-hidden="true" style="color:var(--ls-green)"></i> แจ้งเตือนยอดขายเข้า LINE</div>
+      <div class="ls-head__sub">ส่งสรุปยอดเข้า LINE Official Account ทุกครั้งที่พนักงานส่งยอดเงินสด</div>
+    </div>
+
+    <div class="ls-card">
+      <div class="ls-card__title"><i class="fa fa-info-circle"></i> สถานะปัจจุบัน</div>
+      <div class="ls-status">
+        <span class="dot <?php echo $hasToken ? 'dot--on' : 'dot--off'; ?>"></span>
+        <span><?php echo $hasToken ? 'ตั้งค่า Token แล้ว' : 'ยังไม่ได้ตั้งค่า Token'; ?></span>
+      </div>
+      <div style="font-size:13px;color:var(--ls-muted)">
+        ส่งตอนพนักงานกดส่งยอดเงินสด (พร้อมสรุปเทียบยอดระบบ) — ไม่มีการส่งตามเวลาแล้ว
+      </div>
+    </div>
+
+    <div class="ls-card">
+      <div class="ls-card__title"><i class="fa fa-key"></i> Channel Access Token</div>
+      <label class="ls-label">วาง Token จาก LINE Developers Console (เว้นว่างไว้ = ไม่เปลี่ยนของเดิม)</label>
+      <input type="password" id="lsToken" class="ls-input" placeholder="paste token ที่นี่...">
+
+      <div class="ls-row">
+        <button class="ls-btn ls-btn--primary" id="lsSaveBtn"><i class="fa fa-save"></i> บันทึก</button>
+        <button class="ls-btn ls-btn--ghost" id="lsTestBtn"><i class="fa fa-paper-plane"></i> ส่งทดสอบตอนนี้</button>
+      </div>
+      <div class="ls-msg" id="lsMsg"></div>
+    </div>
+
+    <div class="ls-card">
+      <div class="ls-card__title"><i class="fa fa-list-ol"></i> วิธีเชื่อมกับ LINE (ทำครั้งเดียว)</div>
+      <ol class="ls-steps">
+        <li>สมัคร LINE Official Account ฟรีที่ <a href="https://manager.line.biz" target="_blank" rel="noopener">manager.line.biz</a> (ถ้ายังไม่มี)</li>
+        <li>เปิดใช้ "Messaging API" ในเมนู Settings ของ OA นั้น</li>
+        <li>เชื่อม OA กับ <a href="https://developers.line.biz/console/" target="_blank" rel="noopener">LINE Developers Console</a> แล้วสร้าง/คัดลอก <b>Channel Access Token</b></li>
+        <li>วาง Token ในช่องด้านบน แล้วกด "บันทึก"</li>
+        <li>เอา LINE ส่วนตัวของ admin ไปสแกน QR แอดเป็นเพื่อนกับ OA นี้ (สแกนได้จากหน้า OA Manager)</li>
+        <li>กด "ส่งทดสอบตอนนี้" เพื่อเช็คว่าข้อความเด้งเข้า LINE จริง</li>
+      </ol>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      function $(id) { return document.getElementById(id); }
+      function setMsg(text, kind) {
+        var el = $("lsMsg");
+        el.textContent = text || "";
+        el.className = "ls-msg" + (kind ? " ls-msg--" + kind : "");
+      }
+      function postForm(url, data) {
+        var body = new URLSearchParams(data).toString();
+        return fetch(url, {
+          method: "POST",
+          credentials: "same-origin",
+          cache: "no-store",
+          headers: { "Content-Type": "application/x-www-form-urlencoded", "X-Requested-With": "XMLHttpRequest" },
+          body: body
+        }).then(function (r) { return r.json(); });
+      }
+
+      $("lsSaveBtn").addEventListener("click", function () {
+        var btn = this;
+        btn.disabled = true;
+        setMsg("กำลังบันทึก...", "");
+        postForm("json/line_settings_save.php", { token: $("lsToken").value })
+          .then(function (j) {
+            if (j && j.ok) {
+              setMsg("บันทึกแล้ว", "ok");
+              $("lsToken").value = "";
+              setTimeout(function () { location.reload(); }, 700);
+            } else {
+              setMsg("บันทึกไม่สำเร็จ: " + (j && j.error ? j.error : "ไม่ทราบสาเหตุ"), "err");
+            }
+          })
+          .catch(function () { setMsg("เชื่อมต่อไม่ได้", "err"); })
+          .finally(function () { btn.disabled = false; });
+      });
+
+      $("lsTestBtn").addEventListener("click", function () {
+        var btn = this;
+        btn.disabled = true;
+        setMsg("กำลังส่งทดสอบ...", "");
+        postForm("json/line_settings_test.php", {})
+          .then(function (j) {
+            if (j && j.ok) setMsg("ส่งสำเร็จ! เช็ค LINE ของ admin ได้เลย", "ok");
+            else setMsg("ส่งไม่สำเร็จ: " + (j && j.error ? j.error : "ไม่ทราบสาเหตุ"), "err");
+          })
+          .catch(function () { setMsg("เชื่อมต่อไม่ได้", "err"); })
+          .finally(function () { btn.disabled = false; });
+      });
+    })();
+  </script>
+<script src="/json/kp_time_hm.js?v=1"></script>
+<script src="/json/kp_datepicker.js?v=1"></script>
+</body>
+</html>
